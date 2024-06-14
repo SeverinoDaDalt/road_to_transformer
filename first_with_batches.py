@@ -20,15 +20,16 @@ class NN:
         self.output_states = [None] * (self.n_layers + 1)  # +1 because at the end I store the input
 
     def feedforward(self, x):
-        res = x  # i,j -> j batch dim
+        res = x  # i
         for i in range(self.n_layers):
             if self.debug: print(f"Layer {i}:")
             res = torch.cat((torch.tensor([1.]), res))  # add bias in position 0
-            res = res @ self.layers[i]
-            self.product_states[i] = res
+            res = res @ self.layers[i]  # i,ih -> h
+            self.product_states[i] = res  # h
             if self.debug: print(f" - matrix mult:{res}")
-            res = self.activations[i].f(res)
-            self.output_states[i] = res
+            # TODO: this will no longer work for non-one2one functions (such as softmax), once batch is implemented
+            res = self.activations[i].f(res)  # h -> h
+            self.output_states[i] = res  # h
             if self.debug: print(f" - activation: {res}")
         self.output_states[-1] = x
         return res
@@ -40,14 +41,17 @@ class NN:
                 raise Exception("[BACKPROPAGATION] No states saved. Probably caused by calling .backprop without "
                                 "previously calling .feedforward.")
             if first:
+                # h*h -> h
                 deltas = self.activations[i].der(self.product_states[i]) * self.loss.der(self.output_states[i], y)
                 first = False
             else:  # here we can use deltas from previous step
                 # we skip bias (first row) for delta computation, since it has no implication in previous layers
+                # h*(g,gh) -> h  (g is previous layer hidden dim)
                 deltas = self.activations[i].der(self.product_states[i]) * (deltas @ self.layers[i+1][1:,:].T)
             # Following line uses:
             #  - outer product: ger(X,Y) = [xxx]^T · [yyy] -> sizeX x sizeY matrix
             #  - adding output_state for bias = 1 in position 0
+            # o1,1h -> oh
             gradients = torch.ger(torch.cat((torch.tensor([1.]), self.output_states[i-1])), deltas)
             self.layers[i] -= self.lr * gradients
         # empty gradients
@@ -61,18 +65,18 @@ def main():
 
     input_size = 6
     output_size = 1
-    hidden_dimensions = [input_size, 10, 10, output_size]
+    hidden_dimensions = [input_size, 4, 4, output_size]
     mid_activation = Sigmoid()
     final_activation = Identity()
     loss = MeanSquaredError()
-    lr = 1e-1
-    n_train = 100_000
+    lr = 1e-3
+    n_train = 1000_000
     n_valid = 200
-    n_test = 200
-    batch_size = 10
+    n_test = 20
+    batch_size = 100
 
     # prepare nn
-    print("[first_with_batches.py] Preparing nn.")
+    print("[first.py] Preparing nn.")
     layers = []
     activations = [mid_activation] * (len(hidden_dimensions)-2) + [final_activation]
     for i in range(1, len(hidden_dimensions)):
@@ -80,32 +84,39 @@ def main():
     nn = NN(layers, activations, loss, lr, debug=False)
 
     # prepare dataset
-    print("[first_with_batches.py] Preparing dataset.")
+    print("[first.py] Preparing dataset.")
     dataset = IncreasingDataset(input_size, n_train=n_train, n_valid=n_valid, n_test=n_test)
-    train = dataset.train_iterator()
+    train = batch_generator(dataset.train_iterator(), batch_size=batch_size)
 
     # train
-    for step, (batch_x, batch_y) in enumerate(batch_generator(train, batch_size)):
-        nn.feedforward(torch.tensor(batch_x))
-        nn.backprop(torch.tensor(batch_y))
-        if step % 1_000 == 0:
+    print("[first.py] Training.")
+    for i, (batch_x, batch_y) in enumerate(train):
+        # TODO
+        """
+        if i % 1_000 == 0:
             # valid
-            valid_batches = batch_generator(dataset.valid_iterator(), batch_size)
+            valid = dataset.valid_iterator()
             total_loss = 0
             correct = 0
-            for valid_x, valid_y in valid_batches:
-                output = nn.feedforward(torch.tensor(valid_x))
+            for valid_sequence, valid_y in valid:
+                output = nn.feedforward(torch.tensor(valid_sequence))
                 total_loss += loss.f(torch.tensor(output), torch.tensor(valid_y))
-                # correct += int(abs(output - valid_y) < 0.5) TODO
+                correct += int(abs(output - valid_y) < 0.5)
             total_loss /= n_valid
-            # print(f"{i//1000}\t-> loss: {total_loss}\taccuracy: {correct}/{n_valid}")  TODO
-            print(f"{i//1000}\t-> loss: {total_loss}")
+            print(f"\t[first.py] Validation {i//1000} \t-> loss: {total_loss}\taccuracy: {correct}/{n_valid}")
+        """
+        nn.feedforward(torch.tensor(batch_x))
+        nn.backprop(torch.tensor(batch_y))
 
+    # TODO
+    """
     # test
     test = dataset.test_iterator()
+    print("[first.py] Testing.")
     for sequence, y in test:
         output = nn.feedforward(torch.tensor(sequence))
-        print(f"Sequence: {sequence}\tPrediction: {output}\tReal: {y}\tDifference: {abs(output - y)}")
+        print(f"[first.py] Sequence: {sequence}\tPrediction: {output}\tReal: {y}\tDifference: {abs(output - y)}")
+    """
 
 
 if __name__ == '__main__':

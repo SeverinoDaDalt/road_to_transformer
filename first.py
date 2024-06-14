@@ -61,14 +61,14 @@ def main():
 
     input_size = 6
     output_size = 1
-    hidden_dimensions = [input_size, 10, 10, output_size]
+    hidden_dimensions = [input_size, 4, 4, output_size]
     mid_activation = Sigmoid()
     final_activation = Identity()
     loss = MeanSquaredError()
-    lr = 1e-1
-    n_train = 100_000
+    lr = 1e-3
+    n_train = 1000_000
     n_valid = 200
-    n_test = 200
+    n_test = 20
 
     # prepare nn
     print("[first.py] Preparing nn.")
@@ -84,6 +84,7 @@ def main():
     train = dataset.train_iterator()
 
     # train
+    print("[first.py] Training.")
     for i, (sequence, y) in enumerate(train):
         nn.feedforward(torch.tensor(sequence))
         nn.backprop(torch.tensor(y))
@@ -97,13 +98,14 @@ def main():
                 total_loss += loss.f(torch.tensor(output), torch.tensor(valid_y))
                 correct += int(abs(output - valid_y) < 0.5)
             total_loss /= n_valid
-            print(f"{i//1000}\t-> loss: {total_loss}\taccuracy: {correct}/{n_valid}")
+            print(f"\t[first.py] Validation {i//1000} \t-> loss: {total_loss}\taccuracy: {correct}/{n_valid}")
 
     # test
     test = dataset.test_iterator()
+    print("[first.py] Testing.")
     for sequence, y in test:
         output = nn.feedforward(torch.tensor(sequence))
-        print(f"Sequence: {sequence}\tPrediction: {output}\tReal: {y}\tDifference: {abs(output - y)}")
+        print(f"[first.py] Sequence: {sequence}\tPrediction: {output}\tReal: {y}\tDifference: {abs(output - y)}")
 
 
 if __name__ == '__main__':
