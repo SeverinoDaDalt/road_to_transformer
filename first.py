@@ -66,7 +66,7 @@ def main():
     final_activation = Identity()
     loss = MeanSquaredError()
     lr = 1e-3
-    n_train = 1000_000
+    n_train = 100_000
     n_valid = 200
     n_test = 20
 
@@ -96,7 +96,7 @@ def main():
             for valid_sequence, valid_y in valid:
                 output = nn.feedforward(torch.tensor(valid_sequence))
                 total_loss += loss.f(torch.tensor(output), torch.tensor(valid_y))
-                correct += int(abs(output - valid_y) < 0.5)
+                correct += int(abs(output - valid_y[0]) < 0.5)
             total_loss /= n_valid
             print(f"\t[first.py] Validation {i//1000} \t-> loss: {total_loss}\taccuracy: {correct}/{n_valid}")
 
@@ -105,7 +105,7 @@ def main():
     print("[first.py] Testing.")
     for sequence, y in test:
         output = nn.feedforward(torch.tensor(sequence))
-        print(f"[first.py] Sequence: {sequence}\tPrediction: {output}\tReal: {y}\tDifference: {abs(output - y)}")
+        print(f"[first.py] Sequence: {sequence}\tPrediction: {output}\tReal: {y}\tDifference: {abs(output - torch.tensor(y))}")
 
 
 if __name__ == '__main__':

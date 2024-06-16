@@ -24,25 +24,25 @@ class IncreasingDataset(object):
         for _ in tqdm(range(self.n_valid // 2)):
             ordered_sequence = tuple(sorted([random.randint(-100, 100) for _ in range(self.k)]))
             if ordered_sequence not in self.valid:
-                self.valid[ordered_sequence] = 1
+                self.valid[ordered_sequence] = [1]
         for _ in tqdm(range(self.n_valid - (self.n_valid // 2))):
             sequence = tuple([random.randint(-100, 100) for _ in range(self.k)])
             if sequence == tuple(sorted(sequence)):
                 continue
             if sequence not in self.valid:
-                self.valid[sequence] = 0
+                self.valid[sequence] = [0]
 
         print("[dataset.py] Preparing test.")
         for _ in tqdm(range(self.n_test // 2)):
             ordered_sequence = tuple(sorted([random.randint(-100, 100) for _ in range(self.k)]))
             if ordered_sequence not in self.test and ordered_sequence not in self.valid:
-                self.test[ordered_sequence] = 1
+                self.test[ordered_sequence] = [1]
         for _ in tqdm(range(self.n_test - (self.n_test // 2))):
             sequence = tuple([random.randint(-100, 100) for _ in range(self.k)])
             if sequence == tuple(sorted(sequence)):
                 continue
             if sequence not in self.test and sequence not in self.valid:
-                self.test[sequence] = 0
+                self.test[sequence] = [0]
 
     def train_iterator(self):
         # NOTICE: We allow repeating elements of training!
@@ -52,7 +52,7 @@ class IncreasingDataset(object):
                 for _ in range(MAX_ITER):
                     sequence = tuple(sorted([random.randint(-100, 100) for _ in range(self.k)]))
                     if sequence not in self.test and sequence not in self.valid:
-                        yield sequence, 1
+                        yield sequence, [1]
                         break
                 else:
                     raise Exception("[dataset.py] Reached maximum number of iterations")
@@ -62,7 +62,7 @@ class IncreasingDataset(object):
                     if sequence == tuple(sorted(sequence)):
                         continue
                     if sequence not in self.test and sequence not in self.valid:
-                        yield sequence, 0
+                        yield sequence, [0]
                         break
                 else:
                     raise Exception("[dataset.py] Reached maximum number of iterations")

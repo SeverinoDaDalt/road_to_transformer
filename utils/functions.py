@@ -14,7 +14,7 @@ class Identity:
         return x
 
     def der(self, x):
-        return 1
+        return torch.ones(x.shape)
 
 
 class MeanSquaredError:
