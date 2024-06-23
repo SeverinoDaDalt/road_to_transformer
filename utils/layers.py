@@ -29,7 +29,9 @@ class Linear(Layer):
         batch_size = gradient_output.size(0)
         next_gradient_output = torch.einsum("bx,xy->by", gradient_output, self.weights.T)
         gradients = torch.einsum("bx,by->xy", batchify(self.input_state, batch_size), gradient_output)
+        # update weights
         self.weights -= learning_rate * gradients
+        # reset states
         self.input_state = None
         return next_gradient_output[:,1:]  # We do not care about bias gradients
 
@@ -48,6 +50,8 @@ class Sigmoid(Layer):
             raise Exception("[layers.py] No state saved. Probably caused by calling .backprop without "
                             "previously calling .feedforward.")
         der = self.output_state * (1 - self.output_state)
+        # reset states
+        self.output_state = None
         return torch.einsum("by,by->by", der, gradient_output)
 
 
@@ -73,7 +77,10 @@ class Softmax(Layer):
         expo = torch.exp(self.input_state)  # bh
         sum_ = torch.einsum("bx->b", expo)  # b
         # computation of coef := (Id * T - [e^x, ..., e^x]) / T
-        aux1 = (torch.eye(hidden_size) * sum_).repeat(batch_size, 1, 1)  # bhh
+        aux1 = torch.einsum("bxy,b->bxy", torch.eye(hidden_size).repeat(batch_size, 1, 1), sum_)  # bhh
         aux2 = torch.exp(self.input_state).unsqueeze(2).repeat(1, 1, hidden_size)  # bhh
         coef = torch.einsum("bxy,b->bxy", (aux1 - aux2), (1/sum_))  # bhh
+        # reset states
+        self.input_state = None
+        self.output_state = None
         return torch.einsum("bxy,by->bx", coef, gradient_output)

@@ -1,8 +1,8 @@
 import torch
-from utils.layers import Linear, Sigmoid
+from utils.layers import Linear, Sigmoid, Softmax
 from utils.functions import MeanSquaredError
 from utils.utils import batch_generator
-from datasets.increasing import IncreasingDataset
+from datasets.increasing_and_decreasing import IncreasingDecreasingDataset
 from tqdm import tqdm
 
 
@@ -28,18 +28,19 @@ class NN:
 
 def main():
     input_size = 6
-    output_size = 1
+    output_size = 3
     layers = [
         Linear(input_size, 4),
         Sigmoid(),
         Linear(4, 4),
         Sigmoid(),
         Linear(4, output_size),
+        Softmax()
     ]
     loss = MeanSquaredError()
-    lr = 5e-5
+    lr = 2e-5
     n_train = 10_000_000
-    n_valid = 10_000
+    n_valid = 100
     n_test = 10_000
     batch_size = 10_000
 
@@ -49,7 +50,7 @@ def main():
 
     # prepare dataset
     print("[first.py] Preparing dataset.")
-    dataset = IncreasingDataset(input_size, n_train=n_train, n_valid=n_valid, n_test=n_test)
+    dataset = IncreasingDecreasingDataset(input_size, n_train=n_train, n_valid=n_valid, n_test=n_test)
     train = batch_generator(dataset.train_iterator(), batch_size=batch_size)
 
     # train
@@ -61,9 +62,13 @@ def main():
         correct = 0
         for valid_x, valid_y in valid:
             output = nn.feedforward(torch.tensor(valid_x))
-            total_loss += torch.einsum("xy->", loss.f(torch.tensor(output), torch.tensor(valid_y)))
+            # loss computation
+            total_loss += torch.einsum("b->", loss.f(torch.tensor(output), torch.tensor(valid_y)))
+            # accuracy computation
             for j in range(output.size(0)):
-                correct += int(abs(output[j] - torch.tensor(valid_y[j])) < 0.5)
+                prediction = torch.argmax(output[j])
+                real = torch.argmax(torch.tensor(valid_y)[j])
+                correct += int(prediction == real)
         total_loss /= n_valid
         print(f"\t[first.py] Validation {i} \t-> loss: {total_loss}\taccuracy: {correct}/{n_valid}")
         # learn
@@ -77,9 +82,11 @@ def main():
     print("[first.py] Testing.")
     for test_x, test_y in test:
         output = nn.feedforward(torch.tensor(test_x))
-        total_loss += torch.einsum("xy->", loss.f(torch.tensor(output), torch.tensor(test_y)))
+        total_loss += torch.einsum("b->", loss.f(torch.tensor(output), torch.tensor(test_y)))
         for j in range(output.size(0)):
-            correct = int(abs(output[j] - torch.tensor(test_y[j])) < 0.5)
+            prediction = torch.argmax(output[j])
+            real = torch.argmax(torch.tensor(test_y)[j])
+            correct = int(prediction == real)
             total_correct += correct
             if not correct:
                 print(f"\t[first.py] Not correct \t-> sample: {test_x[j]}\tprediction: {output[j]}\treal: {torch.tensor(test_y[j])}")
