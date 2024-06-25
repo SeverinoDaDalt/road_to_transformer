@@ -1,111 +1,69 @@
 import torch
-from utils.functions import Sigmoid, Identity, MeanSquaredError
-from utils.utils import random_in_interval
+from utils.functions import MeanSquaredError
+from utils.utils import batch_generator
 from datasets.increasing import IncreasingDataset
-from tqdm import tqdm
-
-
-class NN:
-
-    def __init__(self, layers, activations, loss, lr, debug=False):
-        assert len(layers) == len(activations)
-        self.layers = layers  # TODO
-        self.activations = activations  # TODO
-        self.loss = loss
-        self.debug = debug
-        self.lr = lr
-
-        self.n_layers = len(layers)
-        self.product_states = [None] * self.n_layers
-        self.output_states = [None] * (self.n_layers + 1)  # +1 because at the end I store the input
-
-    def feedforward(self, x):
-        res = x
-        for i in range(self.n_layers):
-            if self.debug: print(f"Layer {i}:")
-            res = torch.cat((torch.tensor([1.]), res))  # add bias in position 0
-            res = res @ self.layers[i]
-            self.product_states[i] = res
-            if self.debug: print(f" - matrix mult:{res}")
-            res = self.activations[i].f(res)
-            self.output_states[i] = res
-            if self.debug: print(f" - activation: {res}")
-        self.output_states[-1] = x
-        return res
-
-    def backprop(self, y):
-        first = True
-        for i in range(self.n_layers-1, -1, -1):
-            if self.product_states[i] is None or self.output_states[i] is None or self.output_states[i-1] is None:
-                raise Exception("[BACKPROPAGATION] No states saved. Probably caused by calling .backprop without "
-                                "previously calling .feedforward.")
-            if first:
-                deltas = self.activations[i].der(self.product_states[i]) * self.loss.der(self.output_states[i], y)
-                first = False
-            else:  # here we can use deltas from previous step
-                # we skip bias (first row) for delta computation, since it has no implication in previous layers
-                deltas = self.activations[i].der(self.product_states[i]) * (deltas @ self.layers[i+1][1:,:].T)
-            # Following line uses:
-            #  - outer product: ger(X,Y) = [xxx]^T · [yyy] -> sizeX x sizeY matrix
-            #  - adding output_state for bias = 1 in position 0
-            gradients = torch.ger(torch.cat((torch.tensor([1.]), self.output_states[i-1])), deltas)
-            self.layers[i] -= self.lr * gradients
-        # empty gradients
-        self.product_states = [None] * self.n_layers
-        self.output_states = [None] * (self.n_layers + 1)  # +1 because at the end I store the input
+from neural_network.nn import NN
+from neural_network.layers import Linear, Sigmoid
 
 
 def main():
-    # TODO:
-    #  - allow batches
-
     input_size = 6
     output_size = 1
-    hidden_dimensions = [input_size, 4, 4, output_size]
-    mid_activation = Sigmoid()
-    final_activation = Identity()
+    layers = [
+        Linear(input_size, 4),
+        Sigmoid(),
+        Linear(4, 4),
+        Sigmoid(),
+        Linear(4, output_size),
+    ]
     loss = MeanSquaredError()
-    lr = 1e-3
-    n_train = 100_000
-    n_valid = 200
-    n_test = 20
+    lr = 1e-5
+    n_train = 10_000_000
+    n_valid = 10_000
+    n_test = 10_000
+    batch_size = 20_000
 
     # prepare nn
     print("[first.py] Preparing nn.")
-    layers = []
-    activations = [mid_activation] * (len(hidden_dimensions)-2) + [final_activation]
-    for i in range(1, len(hidden_dimensions)):
-        layers.append(random_in_interval((hidden_dimensions[i-1] + 1, hidden_dimensions[i])))  # +1 is the bias
-    nn = NN(layers, activations, loss, lr, debug=False)
+    nn = NN(layers, loss, lr, debug=False)
 
     # prepare dataset
     print("[first.py] Preparing dataset.")
     dataset = IncreasingDataset(input_size, n_train=n_train, n_valid=n_valid, n_test=n_test)
-    train = dataset.train_iterator()
+    train = batch_generator(dataset.train_iterator(), batch_size=batch_size)
 
     # train
     print("[first.py] Training.")
-    for i, (sequence, y) in enumerate(train):
-        nn.feedforward(torch.tensor(sequence))
-        nn.backprop(torch.tensor(y))
-        if i % 1_000 == 0:
-            # valid
-            valid = dataset.valid_iterator()
-            total_loss = 0
-            correct = 0
-            for valid_sequence, valid_y in valid:
-                output = nn.feedforward(torch.tensor(valid_sequence))
-                total_loss += loss.f(torch.tensor(output), torch.tensor(valid_y))
-                correct += int(abs(output - valid_y[0]) < 0.5)
-            total_loss /= n_valid
-            print(f"\t[first.py] Validation {i//1000} \t-> loss: {total_loss}\taccuracy: {correct}/{n_valid}")
+    for i, (batch_x, batch_y) in enumerate(train):
+        # valid
+        valid = batch_generator(dataset.valid_iterator(), batch_size=batch_size)
+        total_loss = 0
+        correct = 0
+        for valid_x, valid_y in valid:
+            output = nn.feedforward(torch.tensor(valid_x))
+            total_loss += torch.einsum("b->", loss.f(torch.tensor(output), torch.tensor(valid_y)))
+            for j in range(output.size(0)):
+                correct += int(abs(output[j] - torch.tensor(valid_y[j])) < 0.5)
+        total_loss /= n_valid
+        print(f"\t[first.py] Validation {i} \t-> loss: {total_loss}\taccuracy: {correct}/{n_valid}")
+        # learn
+        output = nn.feedforward(torch.tensor(batch_x))
+        nn.backprop(output, torch.tensor(batch_y))
 
     # test
-    test = dataset.test_iterator()
+    test = batch_generator(dataset.test_iterator(), batch_size=batch_size)
+    total_loss = 0
+    total_correct = 0
     print("[first.py] Testing.")
-    for sequence, y in test:
-        output = nn.feedforward(torch.tensor(sequence))
-        print(f"[first.py] Sequence: {sequence}\tPrediction: {output}\tReal: {y}\tDifference: {abs(output - torch.tensor(y))}")
+    for test_x, test_y in test:
+        output = nn.feedforward(torch.tensor(test_x))
+        total_loss += torch.einsum("b->", loss.f(torch.tensor(output), torch.tensor(test_y)))
+        for j in range(output.size(0)):
+            correct = int(abs(output[j] - torch.tensor(test_y[j])) < 0.5)
+            total_correct += correct
+            if not correct:
+                print(f"\t[first.py] Not correct \t-> sample: {test_x[j]}\tprediction: {output[j]}\treal: {torch.tensor(test_y[j])}")
+    print(f"\t[first.py] Test results \t-> loss: {total_loss}\taccuracy: {total_correct}/{n_test}")
 
 
 if __name__ == '__main__':

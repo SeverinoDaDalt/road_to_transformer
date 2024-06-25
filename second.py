@@ -1,29 +1,9 @@
 import torch
-from utils.layers import Linear, Sigmoid, Softmax
 from utils.functions import MeanSquaredError
 from utils.utils import batch_generator
 from datasets.increasing_and_decreasing import IncreasingDecreasingDataset
-from tqdm import tqdm
-
-
-class NN:
-
-    def __init__(self, layers, loss, lr, debug=False):
-        self.layers = layers
-        self.loss = loss
-        self.debug = debug
-        self.lr = lr
-
-    def feedforward(self, x):
-        res = x  # bi
-        for layer in self.layers:
-            res = layer.forward(res)
-        return res
-
-    def backprop(self, output, y):
-        gradient_output = self.loss.der(output, y)
-        for layer in reversed(self.layers):
-            gradient_output = layer.backward(gradient_output, self.lr)
+from neural_network.nn import NN
+from neural_network.layers import Linear, Sigmoid, Softmax
 
 
 def main():
@@ -38,7 +18,7 @@ def main():
         Softmax()
     ]
     loss = MeanSquaredError()
-    lr = 2e-5
+    lr = 3e-5
     n_train = 10_000_000
     n_valid = 100
     n_test = 10_000

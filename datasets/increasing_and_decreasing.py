@@ -1,4 +1,6 @@
 """
+A harder version of increasing.
+Classes:
 [1,0,0] -> not monotonic increasing sequence
 [0,1,0] -> monotonic increasing sequence
 [0,0,1] -> monotonic decreasing sequence
@@ -65,7 +67,7 @@ class IncreasingDecreasingDataset(object):
                         break
                 else:
                     raise Exception("[dataset.py] Reached maximum number of iterations")
-            if choice == 2:
+            elif choice == 2:
                 for _ in range(MAX_ITER):
                     sequence = tuple(reversed(sorted([random.randint(-100, 100) for _ in range(self.k)])))
                     if sequence not in self.test and sequence not in self.valid:
