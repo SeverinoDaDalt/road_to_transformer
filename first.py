@@ -1,5 +1,5 @@
 import torch
-from utils.functions import MeanSquaredError
+from neural_network.loss import MeanSquaredError
 from utils.utils import batch_generator
 from datasets.increasing import IncreasingDataset
 from neural_network.nn import NN

@@ -55,6 +55,27 @@ class Sigmoid(Layer):
         return torch.einsum("by,by->by", der, gradient_output)
 
 
+class ReLU(Layer):
+
+    def __init__(self):
+        self.output_state = None
+
+    def forward(self, input_):
+        self.output_state = torch.max(input_, torch.tensor(0))  # although torch.ReLU already exist
+        return self.output_state
+
+    def backward(self, gradient_output, learning_rate=0):
+        if self.output_state is None:
+            raise Exception("[layers.py] No state saved. Probably caused by calling .backprop without "
+                            "previously calling .feedforward.")
+        der = self.output_state
+        der[der <= 0] = 0  # on why this works: https://stackoverflow.com/a/76396054
+        der[der > 0] = 1
+        # reset states
+        self.output_state = None
+        return torch.einsum("by,by->by", der, gradient_output)
+
+
 class Softmax(Layer):
 
     def __init__(self):

@@ -1,24 +1,25 @@
 import torch
-from utils.functions import MeanSquaredError
+from neural_network.loss import MeanSquaredError, BinaryCrossEntropy
 from utils.utils import batch_generator
 from datasets.increasing_and_decreasing import IncreasingDecreasingDataset
 from neural_network.nn import NN
-from neural_network.layers import Linear, Sigmoid, Softmax
+from neural_network.layers import Linear, ReLU, Sigmoid, Softmax
 
 
 def main():
     input_size = 6
     output_size = 3
+    activation = Sigmoid
     layers = [
         Linear(input_size, 4),
-        Sigmoid(),
+        activation(),
         Linear(4, 4),
-        Sigmoid(),
+        activation(),
         Linear(4, output_size),
         Softmax()
     ]
-    loss = MeanSquaredError()
-    lr = 3e-5
+    loss = BinaryCrossEntropy()
+    lr = 1e-5
     n_train = 10_000_000
     n_valid = 100
     n_test = 10_000
