@@ -1,5 +1,5 @@
 import torch
-from neural_network.loss import MeanSquaredError, BinaryCrossEntropy
+from neural_network.loss import MeanSquaredError, CrossEntropy
 from utils.utils import batch_generator
 from datasets.increasing_and_decreasing import IncreasingDecreasingDataset
 from neural_network.nn import NN
@@ -18,11 +18,11 @@ def main():
         Linear(4, output_size),
         Softmax()
     ]
-    loss = BinaryCrossEntropy()
+    loss = CrossEntropy()
     lr = 1e-5
     n_train = 10_000_000
     n_valid = 100
-    n_test = 10_000
+    n_test = 100
     batch_size = 10_000
 
     # prepare nn
@@ -47,6 +47,7 @@ def main():
             total_loss += torch.einsum("b->", loss.f(torch.tensor(output), torch.tensor(valid_y)))
             # accuracy computation
             for j in range(output.size(0)):
+                # TODO: optimize this computation and better make a function of it
                 prediction = torch.argmax(output[j])
                 real = torch.argmax(torch.tensor(valid_y)[j])
                 correct += int(prediction == real)
