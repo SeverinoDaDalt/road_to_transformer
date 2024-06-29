@@ -3,7 +3,7 @@ from neural_network.loss import MeanSquaredError, CrossEntropy
 from utils.utils import batch_generator
 from datasets.increasing_and_decreasing import IncreasingDecreasingDataset
 from neural_network.nn import NN
-from neural_network.layers import Linear, ReLU, Sigmoid, Softmax
+from neural_network.layers import Linear, ReLU, Sigmoid, Softmax, LayerNorm
 
 
 def main():
@@ -11,11 +11,10 @@ def main():
     output_size = 3
     activation = Sigmoid
     layers = [
-        Linear(input_size, 4),
+        Linear(input_size, 6),
         activation(),
-        Linear(4, 4),
-        activation(),
-        Linear(4, output_size),
+        Linear(6, output_size),
+        LayerNorm(output_size),
         Softmax()
     ]
     loss = CrossEntropy()

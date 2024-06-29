@@ -19,7 +19,7 @@ def batch_generator(pair_iterator, batch_size):
         yield batch1, batch2
 
 
-def batchify(input, batch_size):
+def biasify(input, batch_size):
     """
     Adds one column of 1's respective to the bias of the linear model.
     """
