@@ -1,8 +1,8 @@
 import torch
 
 
-def random_in_interval(dims, min=-1, max=1):
-    return (max-min) * torch.rand(dims) + min
+def random_in_interval(dims, min_=-1, max_=1):
+    return (max_ - min_) * torch.rand(dims) + min_
 
 
 def batch_generator(pair_iterator, batch_size):
@@ -19,11 +19,16 @@ def batch_generator(pair_iterator, batch_size):
         yield batch1, batch2
 
 
-def biasify(input, batch_size):
+def biasify(input_):
     """
     Adds one column of 1's respective to the bias of the linear model.
     """
-    return torch.cat((torch.tensor([[1.]] * batch_size), input), 1)
+    # First, we recover the number of "batch" dimensions (batch, context).
+    # Required to take into account the extra dim given by the context in Attention.
+
+    batch_dims = input_.shape[:-1]
+    ones_hyperplane = torch.ones((*batch_dims, 1))
+    return torch.cat((ones_hyperplane, input_), len(batch_dims))
 
 
 

@@ -2,6 +2,9 @@ from utils.utils import random_in_interval, biasify
 import torch
 
 
+BATCH_LETTERS = "bcde"
+
+
 class Layer:
 
     def forward(self, input_):
@@ -18,16 +21,16 @@ class Linear(Layer):
         self.input_state = None
 
     def forward(self, input_):
-        batch_size = input_.size(0)
         self.input_state = input_
-        return torch.einsum("bx,xy->by", biasify(input_, batch_size), self.weights)
+        bs = BATCH_LETTERS[:len(input_.shape)-1]
+        return torch.einsum(f"{bs}x,xy->{bs}y", biasify(input_), self.weights)
 
     def backward(self, gradient_output, learning_rate=0):
-        assert self.input_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop without "
-                                              "previously calling .feedforward.")
-        batch_size = gradient_output.size(0)
-        next_gradient_output = torch.einsum("bx,xy->by", gradient_output, self.weights.T)
-        gradients = torch.einsum("bx,by->xy", biasify(self.input_state, batch_size), gradient_output)
+        assert self.input_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop "
+                                              "without previously calling .feedforward.")
+        bs = BATCH_LETTERS[:len(gradient_output.shape)-1]
+        next_gradient_output = torch.einsum(f"{bs}x,xy->{bs}y", gradient_output, self.weights.T)
+        gradients = torch.einsum(f"{bs}x,{bs}y->xy", biasify(self.input_state), gradient_output)
         # update weights
         self.weights -= learning_rate * gradients
         # reset states
@@ -53,8 +56,8 @@ class DotLinear(Layer):
         return output
 
     def backward(self, gradient_output, learning_rate=0):
-        assert self.input_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop without "
-                                              "previously calling .feedforward.")
+        assert self.input_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop "
+                                              "without previously calling .feedforward.")
         der = self.gamma
         self.gamma -= learning_rate * torch.einsum("bx->x", self.input_state * gradient_output)
         self.beta -= learning_rate * torch.einsum("bx->x", gradient_output)  # * 1
@@ -71,8 +74,8 @@ class Sigmoid(Layer):
         return self.output_state
 
     def backward(self, gradient_output, learning_rate=0):
-        assert self.output_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop without "
-                                              "previously calling .feedforward.")
+        assert self.output_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop "
+                                               "without previously calling .feedforward.")
         der = self.output_state * (1 - self.output_state)
         # reset states
         self.output_state = None
@@ -89,8 +92,8 @@ class ReLU(Layer):
         return self.output_state
 
     def backward(self, gradient_output, learning_rate=0):
-        assert self.output_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop without "
-                                               "previously calling .feedforward.")
+        assert self.output_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop "
+                                               "without previously calling .feedforward.")
         der = self.output_state
         der[der <= 0] = 0  # on why this works: https://stackoverflow.com/a/76396054
         der[der > 0] = 1
@@ -113,9 +116,9 @@ class Softmax(Layer):
         return self.output_state
 
     def backward(self, gradient_output, learning_rate=0):
-        assert self.input_state is not None and self.output_state is not None, ("[layers.py] No state saved. "
-                                                                                "Probably caused by calling .backprop "
-                                                                                "without previously calling .feedforward.")
+        assert self.input_state is not None and self.output_state is not None, \
+            ("[layers.py] No state saved. Probably caused by calling .backprop "
+             "without previously calling .feedforward.")
         batch_size = gradient_output.size(0)
         hidden_size = gradient_output.size(1)
         expo = torch.exp(self.input_state)  # bh
@@ -187,3 +190,15 @@ class LayerNorm(Layer):
         new_gradient_output = self.dotlinear_layer.backward(gradient_output, learning_rate)
         new_gradient_output = self.normalization_layer.backward(new_gradient_output, learning_rate)
         return new_gradient_output
+
+
+class Attention(Layer):
+
+    def __init__(self):
+        raise NotImplementedError
+
+    def forward(self, input_):
+        raise NotImplementedError
+
+    def backward(self, gradient_output, learning_rate=0):
+        raise NotImplementedError
