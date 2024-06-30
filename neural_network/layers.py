@@ -2,7 +2,7 @@ from utils.utils import random_in_interval, biasify
 import torch
 
 
-BATCH_LETTERS = "bcde"
+BATCH_LETTERS = "bcd"  # More letters may be needed in the future. Avoid using them in einsum...
 
 
 class Layer:
@@ -109,28 +109,31 @@ class Softmax(Layer):
         self.output_state = None
 
     def forward(self, input_):
-        self.input_state = input_  # bh
-        expo = torch.exp(input_)  # bh
-        sum_ = torch.einsum("bx->b", expo)  # b
-        self.output_state = torch.einsum("bx,b->bx", expo, (1 / sum_))  # bh
+        bs = BATCH_LETTERS[:len(input_.shape)-1]
+        self.input_state = input_  # Bh
+        expo = torch.exp(input_)  # Bh
+        sum_ = torch.einsum(f"{bs}x->{bs}", expo)  # B
+        self.output_state = torch.einsum(f"{bs}x,{bs}->{bs}x", expo, (1 / sum_))  # Bh
         return self.output_state
 
     def backward(self, gradient_output, learning_rate=0):
+        # TODO: try to substitute BATCH LETTERS with ellipsis: https://numpy.org/doc/stable/reference/generated/numpy.einsum.html
         assert self.input_state is not None and self.output_state is not None, \
             ("[layers.py] No state saved. Probably caused by calling .backprop "
              "without previously calling .feedforward.")
+        bs = BATCH_LETTERS[:len(gradient_output.shape)-1]
         batch_size = gradient_output.size(0)
         hidden_size = gradient_output.size(1)
-        expo = torch.exp(self.input_state)  # bh
-        sum_ = torch.einsum("bx->b", expo)  # b
+        expo = torch.exp(self.input_state)  # Bh
+        sum_ = torch.einsum(f"{bs}x->{bs}", expo)  # B
         # computation of coef := (Id * T - [e^x, ..., e^x]) / T
-        aux1 = torch.einsum("bxy,b->bxy", torch.eye(hidden_size).repeat(batch_size, 1, 1), sum_)  # bhh
-        aux2 = torch.exp(self.input_state).unsqueeze(2).repeat(1, 1, hidden_size)  # bhh
-        coef = torch.einsum("bxy,b->bxy", (aux1 - aux2), (1/sum_))  # bhh
+        aux1 = torch.einsum(f"{bs}xy,{bs}->{bs}xy", torch.eye(hidden_size).repeat(batch_size, 1, 1), sum_)  # Bhh
+        aux2 = torch.exp(self.input_state).unsqueeze(2).repeat(1, 1, hidden_size)  # Bhh
+        coef = torch.einsum(f"{bs}xy,{bs}->{bs}xy", (aux1 - aux2), (1/sum_))  # Bhh
         # reset states
         self.input_state = None
         self.output_state = None
-        return torch.einsum("bxy,by->bx", coef, gradient_output)
+        return torch.einsum(f"{bs}xy,{bs}y->{bs}x", coef, gradient_output)
 
 
 class MeanAndVarianceNormalization(Layer):
@@ -194,11 +197,29 @@ class LayerNorm(Layer):
 
 class Attention(Layer):
 
-    def __init__(self):
-        raise NotImplementedError
+    def __init__(self, x_size, z_size, hidden_attention_size, output_size, mask):
+        # NOTICE: we are transposing the dimension notation used in Formal Algorithms for Transformers.
+        self.W_query = Linear(x_size, hidden_attention_size)
+        self.W_key = Linear(z_size, hidden_attention_size)
+        self.W_value = Linear(z_size, output_size)
+        self.softmax = Softmax()
+        self.mask = mask
+        self.hidden_attention_size = hidden_attention_size
 
-    def forward(self, input_):
-        raise NotImplementedError
+    def forward(self, x_input, z_input=None):
+        if z_input is None:
+            z_input = x_input
+        query = self.W_query.forward(x_input)  # bxa  Notation: b -> batch, x -> context of x, a -> attention
+        key = self.W_key.forward(z_input)  # bza  Notation: z -> context of z
+        value = self.W_value.forward(z_input)  # bzo Notation: o -> output
+        # S <- K^T @ Q
+        score = torch.einsum("bza,bxa->bzx", key, query)  # bzx
+        score = torch.einsum("bzx,zx->bzx", score, self.mask)  # bzx
+        softmaxed_score = self.softmax.forward(score / torch.sqrt(self.hidden_attention_size))  # bzx
+        output = torch.einsum("bzo,bzx->bxo", value, softmaxed_score)  # bxo
+        # TODO: save state
+        return output
 
     def backward(self, gradient_output, learning_rate=0):
+        # TODO
         raise NotImplementedError
