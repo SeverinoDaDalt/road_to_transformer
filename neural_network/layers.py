@@ -149,7 +149,6 @@ class MeanAndVarianceNormalization(Layer):
         self.epsilon = epsilon  # helps with numerical stability
 
     def forward(self, input_):
-        batch_size = input_.size(0)
         hidden_size = input_.size(1)
         self.input_state = input_  # bh
         self.mean = torch.einsum("bx->b", input_)  # b
@@ -178,6 +177,29 @@ class MeanAndVarianceNormalization(Layer):
         return torch.einsum("bxy,by->bx", coef, gradient_output)
 
 
+class MatrixMultiplication(Layer):
+
+    def __init__(self):
+        self.first_matrix = None
+        self.second_matrix = None
+
+    def forward(self, first_matrix, second_matrix):
+        self.first_matrix = first_matrix  # ...xy
+        self.second_matrix = second_matrix  # ...yz
+        output = torch.einsum("...xy,...yz->...xz", self.first_matrix, self.second_matrix)  # ...xz
+        return output
+
+    def backward(self, gradient_output, learning_rate=0):
+        assert self.first_matrix is not None and self.second_matrix is not None, \
+            ("[layers.py] No state saved. Probably caused by calling .backprop without "
+             "previously calling .feedforward.")
+        first_gradient = torch.einsum("...yz,...xz->...xy", self.second_matrix, gradient_output)
+        second_gradient = torch.einsum("...xy,...xz->...yz", self.first_matrix, gradient_output)
+        self.first_matrix = None
+        self.second_matrix = None
+        return first_gradient, second_gradient
+
+
 class LayerNorm(Layer):
 
     def __init__(self, hidden_size, epsilon=1e-6):
@@ -199,10 +221,16 @@ class Attention(Layer):
 
     def __init__(self, x_size, z_size, hidden_attention_size, output_size, mask):
         # NOTICE: we are transposing the dimension notation used in Formal Algorithms for Transformers.
+
+        # Layers:
         self.W_query = Linear(x_size, hidden_attention_size)
         self.W_key = Linear(z_size, hidden_attention_size)
         self.W_value = Linear(z_size, output_size)
+        self.key_query_multiplication_layer = MatrixMultiplication()
         self.softmax = Softmax()
+        self.score_value_multiplication_layer = MatrixMultiplication()
+
+        # Other
         self.mask = mask
         self.hidden_attention_size = hidden_attention_size
 
@@ -212,14 +240,24 @@ class Attention(Layer):
         query = self.W_query.forward(x_input)  # bxa  Notation: b -> batch, x -> context of x, a -> attention
         key = self.W_key.forward(z_input)  # bza  Notation: z -> context of z
         value = self.W_value.forward(z_input)  # bzo Notation: o -> output
+        # NOTICE: tensor.mT transposes last two dimensions
         # S <- K^T @ Q
-        score = torch.einsum("bza,bxa->bzx", key, query)  # bzx
+        score = self.key_query_multiplication_layer.forward(key, query.mT)  # bzx
         score = torch.einsum("bzx,zx->bzx", score, self.mask)  # bzx
         softmaxed_score = self.softmax.forward(score / torch.sqrt(self.hidden_attention_size))  # bzx
-        output = torch.einsum("bzo,bzx->bxo", value, softmaxed_score)  # bxo
-        # TODO: save state
+        # output = torch.einsum("bzo,bzx->bxo", value, softmaxed_score)  # bxo
+        output = self.score_value_multiplication_layer.forward(softmaxed_score.mT, value)   # bxo
         return output
 
     def backward(self, gradient_output, learning_rate=0):
-        # TODO
-        raise NotImplementedError
+        score_gradient, value_gradient = self.score_value_multiplication_layer.backward(gradient_output, learning_rate)  # bxz, bzo
+        score_gradient = score_gradient.mT  # bzx
+        z_value_gradient = self.W_value.backward(value_gradient)  # ??? TODO
+        score_unsoftmaxed_gradient = self.softmax.backward(score_gradient) / torch.sqrt(self.hidden_attention_size)  # bzx
+        score_masked_gradient = torch.einsum("bzx,zx->bzx", score_unsoftmaxed_gradient, self.mask)  # bzx
+        key_gradient, query_gradient = self.key_query_multiplication_layer.backward(score_masked_gradient)  # bza, bax
+        query_gradient = query_gradient.mT  # bxa
+        x_gradient = self.W_query.backward(query_gradient)  # ??? TODO
+        z_key_gradient = self.W_key.backward(key_gradient)  # ??? TODO
+        z_gradient = z_key_gradient + z_value_gradient  # ??? TODO
+        return x_gradient, z_gradient
