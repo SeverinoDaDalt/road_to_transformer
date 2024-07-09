@@ -2,9 +2,6 @@ from utils.utils import random_in_interval, biasify
 import torch
 
 
-BATCH_LETTERS = "bcd"  # More letters may be needed in the future. Avoid using them in einsum...
-
-
 class Layer:
 
     def forward(self, input_):
@@ -15,6 +12,9 @@ class Layer:
 
 
 class Linear(Layer):
+    """
+    Classical linear layer W @ x + b @ 1^t, where W is an input x output matrix and b is the bias.
+    """
 
     def __init__(self, input_size, output_size, bias=True):
         self.weights = random_in_interval((input_size + int(bias), output_size))
@@ -22,15 +22,17 @@ class Linear(Layer):
 
     def forward(self, input_):
         self.input_state = input_
-        bs = BATCH_LETTERS[:len(input_.shape)-1]
-        return torch.einsum(f"{bs}x,xy->{bs}y", biasify(input_), self.weights)
+        return torch.einsum(f"...x,xy->...y", biasify(input_), self.weights)
 
     def backward(self, gradient_output, learning_rate=0):
+        """
+        The derivative is the weight matrix itself.
+        Weights are updated by x @ g^t where x is the input and g is the gradient coming from the next layer.
+        """
         assert self.input_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop "
                                               "without previously calling .feedforward.")
-        bs = BATCH_LETTERS[:len(gradient_output.shape)-1]
-        next_gradient_output = torch.einsum(f"{bs}x,xy->{bs}y", gradient_output, self.weights.T)
-        gradients = torch.einsum(f"{bs}x,{bs}y->xy", biasify(self.input_state), gradient_output)
+        next_gradient_output = torch.einsum(f"...x,xy->...y", gradient_output, self.weights.T)
+        gradients = torch.einsum(f"...x,...y->xy", biasify(self.input_state), gradient_output)
         # update weights
         self.weights -= learning_rate * gradients
         # reset states
@@ -40,8 +42,7 @@ class Linear(Layer):
 
 class DotLinear(Layer):
     """
-    Linear transformation (of each logit) used in LayerNorm.
-    y <- x * _gamma - _beta
+    Linear transformation (of each logit) used in LayerNorm y = x * _gamma - _beta
     """
 
     def __init__(self, hidden_size):
@@ -52,19 +53,27 @@ class DotLinear(Layer):
     def forward(self, input_):
         batch_size = input_.size(0)
         self.input_state = input_
-        output = torch.einsum("bx,x->bx", input_, self.gamma) + self.beta.repeat(batch_size, 1)
+        output = torch.einsum("...x,x->...x", input_, self.gamma) + self.beta.repeat(batch_size, 1)
         return output
 
     def backward(self, gradient_output, learning_rate=0):
+        """
+        Trivially the derivative is _gamma itself.
+        _gammas are updated by x * g where x is the input and g is the gradient coming from the next layer.
+        _betas are updated by g itself.
+        """
         assert self.input_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop "
                                               "without previously calling .feedforward.")
         der = self.gamma
-        self.gamma -= learning_rate * torch.einsum("bx->x", self.input_state * gradient_output)
-        self.beta -= learning_rate * torch.einsum("bx->x", gradient_output)  # * 1
-        return torch.einsum("y,by->by", der, gradient_output)
+        self.gamma -= learning_rate * torch.einsum("...x->x", self.input_state * gradient_output)
+        self.beta -= learning_rate * torch.einsum("...x->x", gradient_output)  # * 1
+        return torch.einsum("y,...y->...y", der, gradient_output)
 
 
 class Sigmoid(Layer):
+    """
+    Sigmoid activation function s(x) = 1 / (1 + e^x).
+    """
 
     def __init__(self):
         self.output_state = None
@@ -74,16 +83,21 @@ class Sigmoid(Layer):
         return self.output_state
 
     def backward(self, gradient_output, learning_rate=0):
+        """
+        s'(x) = s(x) * (1 - s(x))
+        """
         assert self.output_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop "
                                                "without previously calling .feedforward.")
         der = self.output_state * (1 - self.output_state)
         # reset states
         self.output_state = None
-        return torch.einsum("by,by->by", der, gradient_output)
+        return torch.einsum("...y,...y->...y", der, gradient_output)
 
 
 class ReLU(Layer):
-
+    """
+    ReLU activation function r(x) = max(0, x).
+    """
     def __init__(self):
         self.output_state = None
 
@@ -92,54 +106,63 @@ class ReLU(Layer):
         return self.output_state
 
     def backward(self, gradient_output, learning_rate=0):
+        """
+        The derivative is zero if x < 0 and 1 if x > 0.
+        Although the ReLU function is not differentiable in 0, we can assume its value in this point is zero.
+        This is the standard procedure as explained here: https://stackoverflow.com/a/76396054.
+        """
         assert self.output_state is not None, ("[layers.py] No state saved. Probably caused by calling .backprop "
                                                "without previously calling .feedforward.")
         der = self.output_state
-        der[der <= 0] = 0  # on why this works: https://stackoverflow.com/a/76396054
+        der[der <= 0] = 0
         der[der > 0] = 1
         # reset states
         self.output_state = None
-        return torch.einsum("by,by->by", der, gradient_output)
+        return torch.einsum("...y,...y->...y", der, gradient_output)
 
 
 class Softmax(Layer):
-
+    """
+    Softmax activation function s(x) = e^x / sum(e^x).
+    """
     def __init__(self):
         self.input_state = None
         self.output_state = None
 
     def forward(self, input_):
-        bs = BATCH_LETTERS[:len(input_.shape)-1]
         self.input_state = input_  # Bh
         expo = torch.exp(input_)  # Bh
-        sum_ = torch.einsum(f"{bs}x->{bs}", expo)  # B
-        self.output_state = torch.einsum(f"{bs}x,{bs}->{bs}x", expo, (1 / sum_))  # Bh
+        sum_ = torch.einsum(f"...x->...", expo)  # B
+        self.output_state = torch.einsum(f"...x,...->...x", expo, (1 / sum_))  # Bh
         return self.output_state
 
     def backward(self, gradient_output, learning_rate=0):
-        # TODO: try to substitute BATCH LETTERS with ellipsis: https://numpy.org/doc/stable/reference/generated/numpy.einsum.html
+        """
+        The derivative is (Id*sum(e^x) - [e^x, ..., e^x]) / sum(e^x)
+        """
         assert self.input_state is not None and self.output_state is not None, \
             ("[layers.py] No state saved. Probably caused by calling .backprop "
              "without previously calling .feedforward.")
-        bs = BATCH_LETTERS[:len(gradient_output.shape)-1]
         batch_size = gradient_output.size(0)
         hidden_size = gradient_output.size(1)
         expo = torch.exp(self.input_state)  # Bh
-        sum_ = torch.einsum(f"{bs}x->{bs}", expo)  # B
+        sum_ = torch.einsum(f"...x->...", expo)  # B
         # computation of coef := (Id * T - [e^x, ..., e^x]) / T
-        aux1 = torch.einsum(f"{bs}xy,{bs}->{bs}xy", torch.eye(hidden_size).repeat(batch_size, 1, 1), sum_)  # Bhh
+        aux1 = torch.einsum(f"...xy,...->...xy", torch.eye(hidden_size).repeat(batch_size, 1, 1), sum_)  # Bhh
         aux2 = torch.exp(self.input_state).unsqueeze(2).repeat(1, 1, hidden_size)  # Bhh
-        coef = torch.einsum(f"{bs}xy,{bs}->{bs}xy", (aux1 - aux2), (1/sum_))  # Bhh
+        coef = torch.einsum(f"...xy,...->...xy", (aux1 - aux2), (1/sum_))  # Bhh
         # reset states
         self.input_state = None
         self.output_state = None
-        return torch.einsum(f"{bs}xy,{bs}y->{bs}x", coef, gradient_output)
+        return torch.einsum(f"...xy,...y->...x", coef, gradient_output)
 
 
 class MeanAndVarianceNormalization(Layer):
     """
     This layer normalizes the input by subtracting the mean and dividing by the standard deviation.
-    Used to build LayerNorm and other normalization layers.
+    i.e. n(x) = (x - mean) / (std + epsilon).
+    Epsilon helps control instabilities around zero.
+    This layer is used to build LayerNorm and other normalization layers.
     """
 
     def __init__(self, epsilon=1e-6):
@@ -151,34 +174,39 @@ class MeanAndVarianceNormalization(Layer):
     def forward(self, input_):
         hidden_size = input_.size(1)
         self.input_state = input_  # bh
-        self.mean = torch.einsum("bx->b", input_)  # b
-        mean_extended = torch.einsum("b,x->bx", self.mean, torch.ones((hidden_size)))  # bh
-        self.deviation = torch.sqrt(torch.einsum("bx->b", (input_ - mean_extended)**2) / hidden_size)  # b
-        deviation_extended = torch.einsum("b,x->bx", self.deviation, torch.ones((hidden_size)))  # bh
+        self.mean = torch.einsum("...x->...", input_)  # b
+        mean_extended = torch.einsum("...,x->...x", self.mean, torch.ones((hidden_size)))  # bh
+        self.deviation = torch.sqrt(torch.einsum("...x->...", (input_ - mean_extended)**2) / hidden_size)  # b
+        deviation_extended = torch.einsum("...,x->...x", self.deviation, torch.ones((hidden_size)))  # bh
         output = (input_ - mean_extended) / (deviation_extended + self.epsilon)  # bh
         return output
 
     def backward(self, gradient_output, learning_rate=0):
+        """
+        The derivative is (Id - ONES/n) / (std + epsilon) - ((x - mean)(x - mean)^t) / (n * std * (std + epsilon)^2)
+        """
         assert self.input_state is not None and self.mean is not None and \
                self.deviation is not None, ("[layers.py] No state saved. Probably caused by calling .backprop without "
                                             "previously calling .feedforward.")
         batch_size = gradient_output.size(0)
         hidden_size = gradient_output.size(1)
         aux1 = (torch.eye(hidden_size) - torch.ones((hidden_size, hidden_size)) / hidden_size).repeat(batch_size, 1, 1)  # bhh
-        aux1 = torch.einsum("bxy,b->bxy", aux1, 1/(self.deviation + self.epsilon))  # bhh
-        mean_extended = torch.einsum("b,x->bx", self.mean, torch.ones((hidden_size)))  # bh
-        aux2 = torch.einsum("bx,by->bxy", (self.input_state - mean_extended), (self.input_state - mean_extended))  # bhh
-        aux2 = torch.einsum("bxy,b->bxy", aux2, 1 / (hidden_size * self.deviation * (self.deviation + self.epsilon)**2))  # bhh
+        aux1 = torch.einsum("...xy,...->...xy", aux1, 1/(self.deviation + self.epsilon))  # bhh
+        mean_extended = torch.einsum("...,x->...x", self.mean, torch.ones((hidden_size)))  # bh
+        aux2 = torch.einsum("...x,...y->...xy", (self.input_state - mean_extended), (self.input_state - mean_extended))  # bhh
+        aux2 = torch.einsum("...xy,...->...xy", aux2, 1 / (hidden_size * self.deviation * (self.deviation + self.epsilon)**2))  # bhh
         coef = aux1 - aux2
         # reset states
         self.input_state = None
         self.mean = None
         self.deviation = None
-        return torch.einsum("bxy,by->bx", coef, gradient_output)
+        return torch.einsum("...xy,...y->...x", coef, gradient_output)
 
 
 class MatrixMultiplication(Layer):
-
+    """
+    This layer simply multiplies the two input matrices A @ B.
+    """
     def __init__(self):
         self.first_matrix = None
         self.second_matrix = None
@@ -190,6 +218,9 @@ class MatrixMultiplication(Layer):
         return output
 
     def backward(self, gradient_output, learning_rate=0):
+        """
+        The derivative over the first matrix is the second one and vice-versa.
+        """
         assert self.first_matrix is not None and self.second_matrix is not None, \
             ("[layers.py] No state saved. Probably caused by calling .backprop without "
              "previously calling .feedforward.")
@@ -201,7 +232,9 @@ class MatrixMultiplication(Layer):
 
 
 class LayerNorm(Layer):
-
+    """
+    A standard layer that concatenates the MeanAndVarianceNormalization and a dot layer.
+    """
     def __init__(self, hidden_size, epsilon=1e-6):
         self.normalization_layer = MeanAndVarianceNormalization(epsilon)
         self.dotlinear_layer = DotLinear(hidden_size)
@@ -218,6 +251,9 @@ class LayerNorm(Layer):
 
 
 class Attention(Layer):
+    """
+    TODO: explain
+    """
 
     def __init__(self, x_size, z_size, hidden_attention_size, output_size, mask):
         # NOTICE: we are transposing the dimension notation used in Formal Algorithms for Transformers.
@@ -235,6 +271,8 @@ class Attention(Layer):
         self.hidden_attention_size = hidden_attention_size
 
     def forward(self, x_input, z_input=None):
+        # TODO: b -> ...
+        # Notation: c -> context of x, k -> context of z
         if z_input is None:
             z_input = x_input
         query = self.W_query.forward(x_input)  # bxa  Notation: b -> batch, x -> context of x, a -> attention
@@ -250,14 +288,17 @@ class Attention(Layer):
         return output
 
     def backward(self, gradient_output, learning_rate=0):
+        """
+        TODO: explain
+        """
         score_gradient, value_gradient = self.score_value_multiplication_layer.backward(gradient_output, learning_rate)  # bxz, bzo
         score_gradient = score_gradient.mT  # bzx
-        z_value_gradient = self.W_value.backward(value_gradient)  # ??? TODO
+        z_value_gradient = self.W_value.backward(value_gradient)  # bkz
         score_unsoftmaxed_gradient = self.softmax.backward(score_gradient) / torch.sqrt(self.hidden_attention_size)  # bzx
         score_masked_gradient = torch.einsum("bzx,zx->bzx", score_unsoftmaxed_gradient, self.mask)  # bzx
         key_gradient, query_gradient = self.key_query_multiplication_layer.backward(score_masked_gradient)  # bza, bax
         query_gradient = query_gradient.mT  # bxa
-        x_gradient = self.W_query.backward(query_gradient)  # ??? TODO
-        z_key_gradient = self.W_key.backward(key_gradient)  # ??? TODO
-        z_gradient = z_key_gradient + z_value_gradient  # ??? TODO
+        x_gradient = self.W_query.backward(query_gradient)  # bcx
+        z_key_gradient = self.W_key.backward(key_gradient)  # bkz
+        z_gradient = z_key_gradient + z_value_gradient  # bkz
         return x_gradient, z_gradient
