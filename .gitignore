@@ -1,2 +1,3 @@
 .idea
 **/__pycache__/
+datasets/chess/lichess_db_standard_rated_2024-06.pgn
