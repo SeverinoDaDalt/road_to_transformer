@@ -10,7 +10,7 @@ from tqdm import tqdm
 MAX_ITER = 1_000  # max iter when trying to generate new sequence
 
 
-class IncreasingDataset(object):
+class IncreasingDataset:
 
     def __init__(self, k, n_train=1_000_000, n_valid=0, n_test=0):
         self.k = k  # length of sequences
@@ -21,7 +21,7 @@ class IncreasingDataset(object):
         self.valid = {}
         self.test = {}
 
-        print("[dataset.py] Preparing valid.")
+        print("[increasing.py] Preparing valid.")
         for _ in tqdm(range(self.n_valid // 2)):
             ordered_sequence = tuple(sorted([random.randint(-100, 100) for _ in range(self.k)]))
             if ordered_sequence not in self.valid:
@@ -33,7 +33,7 @@ class IncreasingDataset(object):
             if sequence not in self.valid:
                 self.valid[sequence] = [0]
 
-        print("[dataset.py] Preparing test.")
+        print("[increasing.py] Preparing test.")
         for _ in tqdm(range(self.n_test // 2)):
             ordered_sequence = tuple(sorted([random.randint(-100, 100) for _ in range(self.k)]))
             if ordered_sequence not in self.test and ordered_sequence not in self.valid:
@@ -56,7 +56,7 @@ class IncreasingDataset(object):
                         yield sequence, [1]
                         break
                 else:
-                    raise Exception("[dataset.py] Reached maximum number of iterations")
+                    raise Exception("[increasing.py] Reached maximum number of iterations")
             else:
                 for _ in range(MAX_ITER):
                     sequence = tuple([random.randint(-100, 100) for _ in range(self.k)])
@@ -66,7 +66,7 @@ class IncreasingDataset(object):
                         yield sequence, [0]
                         break
                 else:
-                    raise Exception("[dataset.py] Reached maximum number of iterations")
+                    raise Exception("[increasing.py] Reached maximum number of iterations")
 
     def valid_iterator(self):
         for sequence in self.valid:

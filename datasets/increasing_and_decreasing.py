@@ -12,7 +12,7 @@ from tqdm import tqdm
 MAX_ITER = 1_000  # max iter when trying to generate new sequence
 
 
-class IncreasingDecreasingDataset(object):
+class IncreasingDecreasingDataset:
 
     def __init__(self, k, n_train=1_000_000, n_valid=0, n_test=0):
         self.k = k  # length of sequences
@@ -23,7 +23,7 @@ class IncreasingDecreasingDataset(object):
         self.valid = {}
         self.test = {}
 
-        print("[dataset.py] Preparing valid.")
+        print("[increasing_and_decreasing.py] Preparing valid.")
         for _ in tqdm(range(self.n_valid // 3)):
             ordered_sequence = tuple(sorted([random.randint(-100, 100) for _ in range(self.k)]))
             if ordered_sequence not in self.valid:
@@ -39,7 +39,7 @@ class IncreasingDecreasingDataset(object):
             if sequence not in self.valid:
                 self.valid[sequence] = [1, 0, 0]
 
-        print("[dataset.py] Preparing test.")
+        print("[increasing_and_decreasing.py] Preparing test.")
         for _ in tqdm(range(self.n_test // 3)):
             ordered_sequence = tuple(sorted([random.randint(-100, 100) for _ in range(self.k)]))
             if ordered_sequence not in self.test and ordered_sequence not in self.valid:
@@ -66,7 +66,7 @@ class IncreasingDecreasingDataset(object):
                         yield sequence, [0, 1, 0]
                         break
                 else:
-                    raise Exception("[dataset.py] Reached maximum number of iterations")
+                    raise Exception("[increasing_and_decreasing.py] Reached maximum number of iterations")
             elif choice == 2:
                 for _ in range(MAX_ITER):
                     sequence = tuple(reversed(sorted([random.randint(-100, 100) for _ in range(self.k)])))
@@ -74,7 +74,7 @@ class IncreasingDecreasingDataset(object):
                         yield sequence, [0, 0, 1]
                         break
                 else:
-                    raise Exception("[dataset.py] Reached maximum number of iterations")
+                    raise Exception("[increasing_and_decreasing.py] Reached maximum number of iterations")
             else:
                 for _ in range(MAX_ITER):
                     sequence = tuple([random.randint(-100, 100) for _ in range(self.k)])
@@ -84,7 +84,7 @@ class IncreasingDecreasingDataset(object):
                         yield sequence, [1, 0, 0]
                         break
                 else:
-                    raise Exception("[dataset.py] Reached maximum number of iterations")
+                    raise Exception("[increasing_and_decreasing.py] Reached maximum number of iterations")
 
     def valid_iterator(self):
         for sequence in self.valid:
